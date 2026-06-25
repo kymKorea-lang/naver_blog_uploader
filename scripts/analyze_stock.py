@@ -231,17 +231,25 @@ JSON 형태로 응답해 주세요:
     )
 
     # ThinkingBlock을 건너뛰고 text 블록만 추출
-    raw = next(
-        block.text for block in message.content
-        if hasattr(block, "text")
-    ).strip()
+    text_blocks = [block.text for block in message.content if hasattr(block, "text")]
+    if not text_blocks:
+        raise ValueError(f"text 블록 없음. 전체 content: {message.content}")
+    raw = text_blocks[0].strip()
+    print(f"   [DEBUG] Claude 응답 앞 200자: {raw[:200]}")
 
-    # JSON 펜스 제거
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    raw = raw.strip().rstrip("```").strip()
+    # JSON 추출 — ```json ... ``` 펜스 우선 시도
+    import re
+    fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw)
+    if fence_match:
+        raw = fence_match.group(1).strip()
+    else:
+        # 펜스 없으면 { } 범위 직접 추출
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        if start != -1 and end > start:
+            raw = raw[start:end]
+        else:
+            raise ValueError(f"JSON을 찾을 수 없음. 응답: {raw[:500]}")
 
     return json.loads(raw)
 
