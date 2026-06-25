@@ -2,9 +2,8 @@ name: 📈 Daily KOSPI Stock Analysis
 
 on:
   schedule:
-    # 매일 오전 7시 (KST = UTC+9, 즉 UTC 22:00 전날)
     - cron: "0 22 * * *"
-  workflow_dispatch: # 수동 실행 가능
+  workflow_dispatch:
 
 jobs:
   analyze:
@@ -21,15 +20,48 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install system dependencies (Chrome + ChromeDriver)
+      - name: Install Chrome + matching ChromeDriver (버전 자동 일치)
         run: |
-          sudo apt-get update -qq
+          # 기존 Chrome 완전 제거
+          sudo apt-get remove -y google-chrome-stable chromium-browser || true
+          sudo apt-get autoremove -y || true
+
+          # Chrome 149 고정 설치 (ChromeDriver와 버전 맞춤)
+          wget -q https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_149.0.7827.0-1_amd64.deb 2>/dev/null \
+            || echo "149 다운로드 실패, 최신버전 설치"
+
+          # 최신 안정 Chrome 설치
+          wget -q -O /tmp/chrome.deb \
+            "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
+          sudo apt-get install -y /tmp/chrome.deb
+
+          # 설치된 Chrome 버전 확인
+          CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+\.\d+')
+          CHROME_MAJOR=$(echo $CHROME_VERSION | cut -d. -f1)
+          echo "Chrome 버전: $CHROME_VERSION (major: $CHROME_MAJOR)"
+          echo "CHROME_MAJOR=$CHROME_MAJOR" >> $GITHUB_ENV
+
+          # Chrome 버전에 맞는 ChromeDriver 다운로드
+          # Chrome 115+ 는 새 CfT(Chrome for Testing) 엔드포인트 사용
+          DRIVER_URL="https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/linux64/chromedriver-linux64.zip"
+          echo "ChromeDriver URL: $DRIVER_URL"
+
+          wget -q -O /tmp/chromedriver.zip "$DRIVER_URL" \
+            || wget -q -O /tmp/chromedriver.zip \
+               "https://storage.googleapis.com/chrome-for-testing-public/$(curl -s https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_STABLE)/linux64/chromedriver-linux64.zip"
+
+          unzip -q /tmp/chromedriver.zip -d /tmp/
+          sudo mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver
+          sudo chmod +x /usr/local/bin/chromedriver
+
+          echo "ChromeDriver 버전: $(chromedriver --version)"
+
+      - name: Install system dependencies
+        run: |
           sudo apt-get install -y -qq \
-            google-chrome-stable \
             xvfb \
             fonts-nanum \
             fonts-noto-cjk
-          # ChromeDriver는 undetected-chromedriver가 자동 관리
 
       - name: Install Python dependencies
         run: pip install -r scripts/requirements.txt
@@ -42,13 +74,8 @@ jobs:
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
           NAVER_ID: ${{ secrets.NAVER_ID }}
           NAVER_PW: ${{ secrets.NAVER_PW }}
-          # 한국 로케일 설정
-          LANG: ko_KR.UTF-8
-          LC_ALL: ko_KR.UTF-8
-          # Selenium headless 안정화
           DISPLAY: ":99"
         run: |
-          # 가상 디스플레이 시작 (headless Chrome 안정화용)
           Xvfb :99 -screen 0 1366x768x24 &
           sleep 2
           python scripts/analyze_stock.py
