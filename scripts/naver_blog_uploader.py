@@ -30,7 +30,7 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 # ── 상수 ──────────────────────────────────────────
 NAVER_LOGIN_URL = "https://nid.naver.com/nidlogin.login"
-NAVER_BLOG_WRITE_URL = "https://blog.naver.com/PostWriteForm.naver"
+# blogId는 post_to_naver_blog() 호출 시 NAVER_ID로 동적 생성
 COOKIE_FILE = Path("/tmp/naver_cookies.json")
 SCREENSHOT_DIR = Path("/tmp/screenshots")
 SCREENSHOT_DIR.mkdir(exist_ok=True)
@@ -291,7 +291,10 @@ def upload_to_naver_blog(
 ) -> bool:
     """네이버 블로그 스마트에디터 포스팅 업로드 (iframe 완전 탐색)."""
     print("   📝 블로그 에디터 열기...")
-    driver.get(NAVER_BLOG_WRITE_URL)
+    naver_id = os.environ["NAVER_ID"]
+    blog_write_url = f"https://blog.naver.com/PostWriteForm.naver?blogId={naver_id}"
+    print(f"   에디터 URL: {blog_write_url}")
+    driver.get(blog_write_url)
     human_delay(5, 7)
     _take_screenshot(driver, "editor_loaded")
 
