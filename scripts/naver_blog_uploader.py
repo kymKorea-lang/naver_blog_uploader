@@ -62,10 +62,18 @@ def make_driver() -> uc.Chrome:
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/120.0.0.6099.130 Safari/537.36"
     )
-    # 자동화 감지 플래그 숨기기
     options.add_argument("--disable-blink-features=AutomationControlled")
 
-    driver = uc.Chrome(options=options, use_subprocess=True)
+    # 시스템에 설치된 ChromeDriver 경로 명시 (버전 불일치 방지)
+    chromedriver_path = "/usr/local/bin/chromedriver"
+    if not os.path.exists(chromedriver_path):
+        chromedriver_path = None  # 없으면 자동 탐색
+
+    driver = uc.Chrome(
+        options=options,
+        use_subprocess=True,
+        driver_executable_path=chromedriver_path,
+    )
     driver.execute_script(
         "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     )
