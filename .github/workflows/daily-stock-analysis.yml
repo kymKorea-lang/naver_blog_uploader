@@ -2,13 +2,14 @@ name: 📈 Daily KOSPI Stock Analysis
 
 on:
   schedule:
-    - cron: "0 22 * * *"
+    # 매일 16:00 KST (UTC 07:00) — 장마감(15:30) 후 30분 뒤
+    - cron: "0 7 * * 1-5"
   workflow_dispatch:
 
 jobs:
   analyze:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
 
     steps:
       - name: Checkout repository
@@ -20,56 +21,18 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install Chrome + matching ChromeDriver
-        run: |
-          wget -q -O /tmp/chrome.deb \
-            "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
-          sudo apt-get install -y /tmp/chrome.deb
-
-          CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+\.\d+')
-          echo "Chrome 버전: $CHROME_VERSION"
-
-          wget -q -O /tmp/chromedriver.zip \
-            "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/linux64/chromedriver-linux64.zip" \
-          || wget -q -O /tmp/chromedriver.zip \
-            "https://storage.googleapis.com/chrome-for-testing-public/$(curl -s https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_STABLE)/linux64/chromedriver-linux64.zip"
-
-          unzip -q /tmp/chromedriver.zip -d /tmp/
-          sudo mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver
-          sudo chmod +x /usr/local/bin/chromedriver
-          echo "ChromeDriver 버전: $(chromedriver --version)"
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get install -y -qq xvfb fonts-nanum fonts-noto-cjk
-
       - name: Install Python dependencies
         run: pip install -r scripts/requirements.txt
 
-      - name: Run stock analysis & blog upload & send email
+      - name: Run stock analysis & send email
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
-          NAVER_ID: ${{ secrets.NAVER_ID }}
-          NAVER_PW: ${{ secrets.NAVER_PW }}
-          DISPLAY: ":99"
-        run: |
-          Xvfb :99 -screen 0 1366x768x24 &
-          sleep 2
-          python scripts/analyze_stock.py
+        run: python scripts/analyze_stock.py
 
-      - name: Upload screenshots (항상 업로드 — 성공/실패 무관)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: selenium-screenshots-${{ github.run_number }}
-          path: /tmp/screenshots/
-          retention-days: 7
-          if-no-files-found: warn
-
-      - name: Save analysis result as artifact
+      - name: Save analysis result
         if: always()
         uses: actions/upload-artifact@v4
         with:
