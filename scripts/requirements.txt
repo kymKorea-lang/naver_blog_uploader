@@ -2,7 +2,3 @@ anthropic>=0.25.0
 requests>=2.31.0
 beautifulsoup4>=4.12.0
 lxml>=5.0.0
-
-# Selenium + 봇 탐지 우회
-undetected-chromedriver>=3.5.5
-selenium>=4.18.0
