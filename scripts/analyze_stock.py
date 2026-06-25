@@ -482,21 +482,31 @@ def build_email_html(
 
 
 def send_email(subject: str, html_body: str) -> None:
-    """Gmail SMTP로 이메일 발송."""
+    """Gmail SMTP로 이메일 발송 — 여러 수신자 지원.
+
+    RECIPIENT_EMAIL 환경변수에 쉼표로 구분해서 여러 이메일 입력 가능.
+    예: hong@gmail.com,kim@naver.com,lee@kakao.com
+    """
     sender = os.environ["GMAIL_USER"]
     password = os.environ["GMAIL_APP_PASSWORD"]
-    recipient = os.environ["RECIPIENT_EMAIL"]
+
+    # 쉼표로 구분된 수신자 목록 파싱 (공백 제거)
+    raw_recipients = os.environ["RECIPIENT_EMAIL"]
+    recipients = [r.strip() for r in raw_recipients.split(",") if r.strip()]
+    print(f"   수신자 목록: {recipients}")
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = sender
-    msg["To"] = recipient
+    msg["To"] = ", ".join(recipients)  # 헤더에 전체 수신자 표시
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(sender, password)
-        server.sendmail(sender, recipient, msg.as_string())
-    print(f"✅ 이메일 발송 완료: {recipient}")
+        # sendmail에 리스트로 전달하면 전원에게 발송
+        server.sendmail(sender, recipients, msg.as_string())
+
+    print(f"✅ 이메일 발송 완료: {len(recipients)}명 → {', '.join(recipients)}")
 
 
 def save_output(company_name: str, ticker: str, analysis: dict) -> None:
