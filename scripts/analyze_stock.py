@@ -171,9 +171,9 @@ def analyze_with_claude(
 ) -> dict:
     """Claude API로 주식 분석 및 블로그 콘텐츠 생성."""
     client = anthropic.Anthropic(
-    api_key=os.environ["ANTHROPIC_API_KEY"],
-    base_url="https://aiprimetech.io",
-)
+        api_key=os.environ["ANTHROPIC_API_KEY"],
+        base_url="https://aiprimetech.io",
+    )
 
     today = datetime.date.today().strftime("%Y년 %m월 %d일")
     news_text = "\n".join(
@@ -230,7 +230,12 @@ JSON 형태로 응답해 주세요:
         messages=[{"role": "user", "content": prompt}],
     )
 
-    raw = message.content[0].text.strip()
+    # ThinkingBlock을 건너뛰고 text 블록만 추출
+    raw = next(
+        block.text for block in message.content
+        if hasattr(block, "text")
+    ).strip()
+
     # JSON 펜스 제거
     if raw.startswith("```"):
         raw = raw.split("```")[1]
