@@ -119,13 +119,23 @@ def load_cookies(driver: uc.Chrome) -> bool:
 
 def _is_logged_in(driver: uc.Chrome) -> bool:
     """현재 네이버 로그인 상태 확인."""
-    driver.get("https://www.naver.com")
-    human_delay(1, 1.5)
+    # 현재 URL이 로그인 페이지면 무조건 비로그인
+    if "nidlogin" in driver.current_url or "login" in driver.current_url:
+        return False
     try:
-        # 로그인 버튼이 없으면 로그인 상태
-        login_btn = driver.find_elements(By.CSS_SELECTOR, ".link_login")
-        return len(login_btn) == 0
-    except Exception:
+        driver.get("https://www.naver.com")
+        human_delay(2, 3)
+        # 로그아웃 버튼 또는 프로필 영역이 있으면 로그인 상태
+        logged_in_els = driver.find_elements(
+            By.CSS_SELECTOR,
+            ".MyView-module__btn_my___HGNqJ, .gnb_my_nm, #account, .link_logout, [class*='MyView']"
+        )
+        login_btn = driver.find_elements(By.CSS_SELECTOR, ".link_login, .btn_login")
+        print(f"   로그인 확인 — 로그인버튼:{len(login_btn)}, 마이페이지:{len(logged_in_els)}")
+        # 로그인 버튼이 없거나 마이페이지가 있으면 로그인 상태
+        return len(login_btn) == 0 or len(logged_in_els) > 0
+    except Exception as e:
+        print(f"   로그인 확인 오류: {e}")
         return False
 
 
@@ -162,13 +172,13 @@ def naver_login(driver: uc.Chrome) -> bool:
             print("   ❌ 아이디 입력창을 찾을 수 없음")
             return False
 
-        # JS로 값 주입 후 이벤트 발생
-        driver.execute_script("""
-            arguments[0].focus();
-            arguments[0].value = arguments[1];
-            arguments[0].dispatchEvent(new Event('input', {bubbles:true}));
-            arguments[0].dispatchEvent(new Event('change', {bubbles:true}));
-        """, id_input, naver_id)
+        # 실제 키보드 타이핑으로 입력 (JS 주입 차단 우회)
+        id_input.click()
+        human_delay(0.3, 0.6)
+        id_input.send_keys(Keys.CONTROL, "a")  # 기존 내용 지우기
+        id_input.send_keys(Keys.DELETE)
+        human_delay(0.2, 0.4)
+        human_type(id_input, naver_id)
         human_delay(0.8, 1.5)
 
         # 비밀번호 입력창
@@ -188,12 +198,13 @@ def naver_login(driver: uc.Chrome) -> bool:
             print("   ❌ 비밀번호 입력창을 찾을 수 없음")
             return False
 
-        driver.execute_script("""
-            arguments[0].focus();
-            arguments[0].value = arguments[1];
-            arguments[0].dispatchEvent(new Event('input', {bubbles:true}));
-            arguments[0].dispatchEvent(new Event('change', {bubbles:true}));
-        """, pw_input, naver_pw)
+        # 비밀번호도 실제 타이핑
+        pw_input.click()
+        human_delay(0.3, 0.6)
+        pw_input.send_keys(Keys.CONTROL, "a")
+        pw_input.send_keys(Keys.DELETE)
+        human_delay(0.2, 0.4)
+        human_type(pw_input, naver_pw)
         human_delay(0.8, 1.5)
 
         # 로그인 버튼
