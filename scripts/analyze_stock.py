@@ -77,38 +77,9 @@ KOSPI_TOP100 = [
 
 
 def pick_today_stock() -> tuple[str, str, str]:
-    """
-    매일 다른 종목 순환 선택.
-    counter.txt 파일에 마지막 인덱스를 저장해서 실행할 때마다 다음 종목으로 이동.
-    """
-    counter_file = Path("counter.txt")
-
-    # 오늘 날짜 확인 — 같은 날 중복 실행 시 같은 종목 유지
-    today_str = datetime.date.today().isoformat()
-
-    if counter_file.exists():
-        data = counter_file.read_text(encoding="utf-8").strip().split("
-")
-        last_date = data[0] if len(data) > 0 else ""
-        last_index = int(data[1]) if len(data) > 1 else -1
-
-        if last_date == today_str:
-            # 오늘 이미 실행됐으면 같은 종목
-            index = last_index
-            print(f"   오늘 이미 실행됨 — 같은 종목 유지 (index: {index})")
-        else:
-            # 새로운 날 — 다음 종목으로 이동
-            index = (last_index + 1) % len(KOSPI_TOP100)
-            counter_file.write_text(f"{today_str}
-{index}", encoding="utf-8")
-            print(f"   새로운 날 — 다음 종목으로 이동 (index: {index})")
-    else:
-        # 최초 실행
-        index = 0
-        counter_file.write_text(f"{today_str}
-{index}", encoding="utf-8")
-        print(f"   최초 실행 (index: {index})")
-
+    """날짜 기반으로 오늘의 종목 선택 (순환)."""
+    day_of_year = datetime.date.today().timetuple().tm_yday
+    index = day_of_year % len(KOSPI_TOP100)
     return KOSPI_TOP100[index]
 
 
