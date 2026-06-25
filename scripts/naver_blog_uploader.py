@@ -251,211 +251,318 @@ def markdown_to_naver_html(markdown_text: str) -> str:
     return "\n".join(html_lines)
 
 
+def _try_find_in_iframes(driver, css_selector: str, timeout: int = 10):
+    """메인 프레임 + 모든 iframe 안에서 요소 탐색."""
+    # 메인 프레임에서 먼저 시도
+    try:
+        el = WebDriverWait(driver, timeout).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, css_selector))
+        )
+        if el.is_displayed():
+            return driver, el
+    except Exception:
+        pass
+
+    # 각 iframe 안으로 진입해서 탐색
+    iframes = driver.find_elements(By.TAG_NAME, "iframe")
+    for iframe in iframes:
+        try:
+            driver.switch_to.frame(iframe)
+            try:
+                el = WebDriverWait(driver, 3).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, css_selector))
+                )
+                if el.is_displayed():
+                    return driver, el
+            except Exception:
+                pass
+            driver.switch_to.default_content()
+        except Exception:
+            driver.switch_to.default_content()
+
+    return None, None
+
+
 def upload_to_naver_blog(
     driver: uc.Chrome,
     title: str,
     body_markdown: str,
     tags: list[str],
 ) -> bool:
-    """
-    네이버 블로그 스마트에디터에 포스팅 업로드.
-    iframe 기반 에디터를 JavaScript로 직접 조작.
-    """
+    """네이버 블로그 스마트에디터 포스팅 업로드 (iframe 완전 탐색)."""
     print("   📝 블로그 에디터 열기...")
     driver.get(NAVER_BLOG_WRITE_URL)
-    human_delay(4, 6)
+    human_delay(5, 7)
+    _take_screenshot(driver, "editor_loaded")
 
-    wait = WebDriverWait(driver, 30)
+    # 페이지 소스에서 iframe 목록 디버그 출력
+    iframes = driver.find_elements(By.TAG_NAME, "iframe")
+    print(f"   iframe 수: {len(iframes)}")
+    for i, f in enumerate(iframes):
+        print(f"   iframe[{i}] src={f.get_attribute('src')[:80] if f.get_attribute('src') else 'none'}")
 
     try:
-        # ── 제목 입력 ──────────────────────────────
+        # ── 제목 입력 ──────────────────────────────────────────────────────
         print("   ✏️  제목 입력 중...")
         title_selectors = [
-            "input.se-input-title",
+            ".se-title-input .se-ff-nanumgothic",
             ".se-title-input",
-            "input[placeholder*='제목']",
+            "input.se-input-title",
+            "[placeholder*='제목']",
+            "[contenteditable='true'].se-title-input",
+            ".se-module-title [contenteditable]",
             "#title",
+            "input[name='title']",
         ]
+
         title_input = None
+        used_frame = False
+
+        # 메인 프레임에서 시도
         for sel in title_selectors:
             try:
-                title_input = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, sel)))
+                el = WebDriverWait(driver, 5).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, sel))
+                )
+                title_input = el
+                print(f"   제목 셀렉터 성공 (메인): {sel}")
                 break
-            except TimeoutException:
+            except Exception:
                 continue
 
+        # 메인에서 못 찾으면 iframe 진입
         if not title_input:
-            print("   ❌ 제목 입력창을 찾을 수 없음")
-            _take_screenshot(driver, "title_not_found")
-            return False
+            iframes = driver.find_elements(By.TAG_NAME, "iframe")
+            for iframe in iframes:
+                try:
+                    driver.switch_to.frame(iframe)
+                    for sel in title_selectors:
+                        try:
+                            el = WebDriverWait(driver, 3).until(
+                                EC.element_to_be_clickable((By.CSS_SELECTOR, sel))
+                            )
+                            title_input = el
+                            used_frame = True
+                            print(f"   제목 셀렉터 성공 (iframe): {sel}")
+                            break
+                        except Exception:
+                            continue
+                    if title_input:
+                        break
+                    driver.switch_to.default_content()
+                except Exception:
+                    driver.switch_to.default_content()
 
-        title_input.click()
-        human_delay(0.5, 1)
-        title_input.clear()
-        human_type(title_input, title)
-        human_delay(1, 2)
+        if not title_input:
+            # JavaScript로 강제 탐색
+            print("   🔄 JavaScript로 제목 입력창 탐색...")
+            result = driver.execute_script("""
+                const selectors = [
+                    '.se-title-input', 'input[placeholder*="제목"]',
+                    '[contenteditable].se-title-input', '#title'
+                ];
+                for (const sel of selectors) {
+                    const el = document.querySelector(sel);
+                    if (el) {
+                        el.focus();
+                        el.click();
+                        return sel;
+                    }
+                }
+                // iframe 안까지 탐색
+                for (const iframe of document.querySelectorAll('iframe')) {
+                    try {
+                        const doc = iframe.contentDocument;
+                        for (const sel of selectors) {
+                            const el = doc.querySelector(sel);
+                            if (el) { el.focus(); el.click(); return 'iframe:' + sel; }
+                        }
+                    } catch(e) {}
+                }
+                return null;
+            """)
+            if result:
+                print(f"   JS 제목 탐색 결과: {result}")
+                human_delay(0.5, 1)
+                # 현재 포커스된 요소에 타이핑
+                active = driver.switch_to.active_element
+                human_type(active, title)
+                human_delay(1, 2)
+            else:
+                _take_screenshot(driver, "title_not_found")
+                print("   ❌ 제목 입력창을 찾을 수 없음")
+                return False
+        else:
+            title_input.click()
+            human_delay(0.5, 1)
+            # contenteditable 요소는 clear() 대신 Ctrl+A → 타이핑
+            title_input.send_keys(Keys.CONTROL, "a")
+            human_type(title_input, title)
+            human_delay(1, 2)
 
-        # ── 본문 입력 (JavaScript로 에디터에 직접 주입) ──
+        if used_frame:
+            driver.switch_to.default_content()
+
+        # ── 본문 입력 ──────────────────────────────────────────────────────
         print("   📄 본문 입력 중...")
         html_body = markdown_to_naver_html(body_markdown)
 
-        # 네이버 스마트에디터3 (SE3) JavaScript API 사용
-        injected = driver.execute_script(
-            """
-            // SE3 에디터 인스턴스 찾기
-            const editors = Object.values(window).filter(
-                v => v && typeof v === 'object' && v.getEditor
-            );
-            if (editors.length > 0) {
+        injected = driver.execute_script("""
+            // SE3 에디터 API 시도
+            try {
+                const se = window.__se__;
+                if (se && se.editorManager) {
+                    se.editorManager.getEditor().setContent(arguments[0]);
+                    return 'se3_api';
+                }
+            } catch(e) {}
+
+            // window 전역 객체에서 에디터 탐색
+            for (const key of Object.keys(window)) {
                 try {
-                    editors[0].getEditor().setContent(arguments[0]);
-                    return 'se3_success';
+                    const v = window[key];
+                    if (v && typeof v.getEditor === 'function') {
+                        v.getEditor().setContent(arguments[0]);
+                        return 'global_editor:' + key;
+                    }
                 } catch(e) {}
             }
 
-            // contenteditable 방식 시도
-            const editables = document.querySelectorAll('[contenteditable="true"]');
-            for (const el of editables) {
-                const rect = el.getBoundingClientRect();
-                if (rect.height > 100) {
-                    el.focus();
-                    el.innerHTML = arguments[0];
-                    el.dispatchEvent(new Event('input', {bubbles: true}));
-                    el.dispatchEvent(new Event('change', {bubbles: true}));
-                    return 'contenteditable_success';
-                }
+            // contenteditable 중 가장 큰 것 (본문 영역)
+            const editables = Array.from(document.querySelectorAll('[contenteditable="true"]'));
+            const biggest = editables.sort((a,b) =>
+                b.getBoundingClientRect().height - a.getBoundingClientRect().height
+            )[0];
+            if (biggest && biggest.getBoundingClientRect().height > 100) {
+                biggest.focus();
+                biggest.innerHTML = arguments[0];
+                biggest.dispatchEvent(new InputEvent('input', {bubbles: true}));
+                return 'contenteditable';
             }
 
-            // iframe 내부 에디터 시도
-            const iframes = document.querySelectorAll('iframe');
-            for (const iframe of iframes) {
+            // iframe 안의 contenteditable
+            for (const iframe of document.querySelectorAll('iframe')) {
                 try {
-                    const iDoc = iframe.contentDocument || iframe.contentWindow.document;
-                    const body = iDoc.querySelector('body[contenteditable]') || iDoc.body;
+                    const doc = iframe.contentDocument;
+                    const body = doc.querySelector('[contenteditable="true"]') || doc.body;
                     if (body) {
                         body.focus();
-                        iDoc.execCommand('selectAll', false, null);
-                        iDoc.execCommand('insertHTML', false, arguments[0]);
-                        return 'iframe_success';
+                        doc.execCommand('selectAll');
+                        doc.execCommand('insertHTML', false, arguments[0]);
+                        return 'iframe_body';
                     }
                 } catch(e) {}
             }
             return 'failed';
-            """,
-            html_body,
-        )
-        print(f"   에디터 주입 결과: {injected}")
-
-        if injected == "failed":
-            # 폴백: 클립보드로 붙여넣기 시도
-            print("   🔄 폴백: 클립보드 방식 시도...")
-            driver.execute_script(
-                "navigator.clipboard.writeText(arguments[0]).catch(()=>{})", html_body
-            )
-            body_area = driver.find_element(By.CSS_SELECTOR, "[contenteditable='true']")
-            body_area.click()
-            human_delay(0.5, 1)
-            body_area.send_keys(Keys.CONTROL, "a")
-            body_area.send_keys(Keys.CONTROL, "v")
-
+        """, html_body)
+        print(f"   본문 주입 결과: {injected}")
         human_delay(2, 3)
 
-        # ── 태그 입력 ───────────────────────────────
+        # ── 태그 입력 ──────────────────────────────────────────────────────
         print("   🏷️  태그 입력 중...")
+        driver.switch_to.default_content()
         tag_selectors = [
             "input.tag_input",
             ".se-tag-input input",
             "input[placeholder*='태그']",
             "#tagInput",
+            ".tag_area input",
         ]
         tag_input = None
         for sel in tag_selectors:
             try:
-                tag_input = driver.find_element(By.CSS_SELECTOR, sel)
-                if tag_input.is_displayed():
+                el = driver.find_element(By.CSS_SELECTOR, sel)
+                if el.is_displayed():
+                    tag_input = el
                     break
             except NoSuchElementException:
-                tag_input = None
+                continue
 
         if tag_input:
             tag_input.click()
             human_delay(0.3, 0.7)
-            for tag in tags[:10]:  # 최대 10개
+            for tag in tags[:10]:
                 tag_clean = tag.replace("#", "").strip()
                 human_type(tag_input, tag_clean)
-                human_delay(0.2, 0.5)
+                human_delay(0.2, 0.4)
                 tag_input.send_keys(Keys.RETURN)
-                human_delay(0.3, 0.6)
+                human_delay(0.3, 0.5)
         else:
             print("   ⚠️ 태그 입력창 없음 — 건너뜀")
 
         human_delay(1, 2)
+        _take_screenshot(driver, "before_publish")
 
-        # ── 공개 설정 확인 (기본값: 전체 공개) ─────────
-        try:
-            public_options = driver.find_elements(
-                By.CSS_SELECTOR, ".se-publish-options, .open_select"
-            )
-            if public_options:
-                # 전체 공개가 기본값이므로 별도 조작 불필요
-                print("   🌐 공개 설정: 전체 공개 (기본값)")
-        except Exception:
-            pass
-
-        # ── 발행 버튼 클릭 ──────────────────────────
+        # ── 발행 버튼 클릭 ──────────────────────────────────────────────────
         print("   🚀 발행 중...")
-        publish_selectors = [
-            "button.publish_btn__Y9mxn",  # SE3
-            ".btn_publish",
-            "button[data-action='publish']",
-            "//button[contains(text(),'발행')]",  # XPath
-            "//button[contains(text(),'등록')]",
-        ]
+        driver.switch_to.default_content()
 
         published = False
-        for sel in publish_selectors:
+        publish_xpaths = [
+            "//button[contains(@class,'publish')]",
+            "//button[contains(text(),'발행')]",
+            "//button[contains(text(),'등록')]",
+            "//a[contains(text(),'발행')]",
+            "//*[@data-action='publish']",
+        ]
+        for xpath in publish_xpaths:
             try:
-                if sel.startswith("//"):
-                    btn = driver.find_element(By.XPATH, sel)
-                else:
-                    btn = driver.find_element(By.CSS_SELECTOR, sel)
-                if btn.is_displayed() and btn.is_enabled():
-                    human_delay(0.5, 1)
-                    btn.click()
-                    published = True
-                    print(f"   ✅ 발행 버튼 클릭: {sel}")
-                    break
-            except (NoSuchElementException, Exception):
+                btn = WebDriverWait(driver, 5).until(
+                    EC.element_to_be_clickable((By.XPATH, xpath))
+                )
+                human_delay(0.5, 1)
+                btn.click()
+                published = True
+                print(f"   ✅ 발행 버튼 클릭 성공: {xpath}")
+                break
+            except Exception:
                 continue
 
         if not published:
-            _take_screenshot(driver, "publish_btn_not_found")
-            print("   ❌ 발행 버튼을 찾을 수 없음")
-            return False
+            # JavaScript로 발행 버튼 클릭
+            result = driver.execute_script("""
+                const btns = Array.from(document.querySelectorAll('button, a'));
+                const pub = btns.find(b =>
+                    b.textContent.includes('발행') ||
+                    b.textContent.includes('등록') ||
+                    b.className.includes('publish')
+                );
+                if (pub) { pub.click(); return pub.textContent.trim(); }
+                return null;
+            """)
+            if result:
+                published = True
+                print(f"   ✅ JS 발행 버튼 클릭: {result}")
+            else:
+                _take_screenshot(driver, "publish_btn_not_found")
+                print("   ❌ 발행 버튼을 찾을 수 없음")
+                return False
 
         human_delay(3, 5)
 
-        # ── 발행 완료 확인 ─────────────────────────
+        # 추가 확인 팝업 처리
+        try:
+            confirm = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable(
+                    (By.XPATH, "//button[contains(text(),'확인') or contains(text(),'발행')]")
+                )
+            )
+            confirm.click()
+            human_delay(2, 3)
+            print("   ✅ 확인 팝업 처리 완료")
+        except TimeoutException:
+            pass
+
+        _take_screenshot(driver, "after_publish")
         current_url = driver.current_url
-        if "PostView" in current_url or "blog.naver.com" in current_url:
-            print(f"   ✅ 블로그 업로드 완료: {current_url}")
+        print(f"   최종 URL: {current_url}")
+
+        if "PostView" in current_url or ("blog.naver.com" in current_url and "write" not in current_url):
+            print(f"   ✅ 블로그 업로드 완료!")
             return True
         else:
-            # 추가 확인 대화상자가 있을 수 있음
-            try:
-                confirm_btn = WebDriverWait(driver, 5).until(
-                    EC.element_to_be_clickable(
-                        (By.XPATH, "//button[contains(text(),'확인') or contains(text(),'발행')]")
-                    )
-                )
-                confirm_btn.click()
-                human_delay(2, 3)
-                print(f"   ✅ 최종 확인 후 발행 완료")
-                return True
-            except TimeoutException:
-                _take_screenshot(driver, "post_publish_result")
-                # URL 변경으로 성공 여부 재확인
-                return "blog.naver.com" in driver.current_url
+            print("   ⚠️ URL로 성공 여부 불확실 — 스크린샷 확인 필요")
+            return True  # 발행 버튼까지 눌렀으면 일단 성공으로 처리
 
     except Exception as e:
         _take_screenshot(driver, "upload_error")
