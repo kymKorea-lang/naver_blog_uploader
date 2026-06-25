@@ -2,7 +2,7 @@ name: 📈 Daily KOSPI Stock Analysis
 
 on:
   schedule:
-    # 매일 16:00 KST (UTC 07:00) — 장마감(15:30) 후 30분 뒤
+    # 매일 16:00 KST (UTC 07:00) — 장마감(15:30) 후 30분 뒤, 평일만
     - cron: "0 7 * * 1-5"
   workflow_dispatch:
 
@@ -10,10 +10,14 @@ jobs:
   analyze:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write  # counter.txt 커밋 권한
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -31,6 +35,14 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
         run: python scripts/analyze_stock.py
+
+      - name: Save counter.txt (종목 순환 카운터)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add counter.txt output/ || true
+          git diff --staged --quiet || git commit -m "chore: 종목 카운터 업데이트 $(date +'%Y-%m-%d')"
+          git push || true
 
       - name: Save analysis result
         if: always()
