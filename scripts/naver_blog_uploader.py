@@ -132,47 +132,103 @@ def _is_logged_in(driver: uc.Chrome) -> bool:
 def naver_login(driver: uc.Chrome) -> bool:
     """
     네이버 ID/PW 로그인.
-    JavaScript로 입력값 주입 → CAPTCHA 우회율 향상.
+    영문/한글 셀렉터 모두 시도, JavaScript 입력 주입으로 봇 탐지 우회.
     """
     naver_id = os.environ["NAVER_ID"]
     naver_pw = os.environ["NAVER_PW"]
 
     driver.get(NAVER_LOGIN_URL)
-    human_delay(2, 3)
+    human_delay(3, 4)
+    _take_screenshot(driver, "login_page")
+    print(f"   로그인 페이지 URL: {driver.current_url}")
 
     try:
         wait = WebDriverWait(driver, 15)
 
-        # JavaScript로 입력값 주입 (봇 탐지 우회)
-        id_input = wait.until(EC.presence_of_element_located((By.ID, "id")))
-        driver.execute_script(
-            "arguments[0].value = arguments[1];", id_input, naver_id
-        )
-        id_input.send_keys(Keys.TAB)  # 포커스 이동으로 이벤트 발생
-        human_delay(0.5, 1.2)
+        # 아이디 입력창 — 여러 셀렉터 시도 (영문/한글 UI 모두 대응)
+        id_input = None
+        for sel in ["#id", "input#id", "input[name='id']",
+                    "input[placeholder*='아이디']", "input[placeholder*='ID']",
+                    "input[placeholder*='Phone']", "input[type='text']"]:
+            try:
+                id_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, sel)))
+                print(f"   아이디 셀렉터 성공: {sel}")
+                break
+            except Exception:
+                continue
 
-        pw_input = driver.find_element(By.ID, "pw")
-        driver.execute_script(
-            "arguments[0].value = arguments[1];", pw_input, naver_pw
-        )
-        pw_input.send_keys(Keys.TAB)
-        human_delay(0.5, 1.0)
-
-        # 로그인 버튼 클릭
-        login_btn = driver.find_element(By.ID, "log.login")
-        login_btn.click()
-        human_delay(3, 5)
-
-        # CAPTCHA 감지
-        if "captcha" in driver.current_url.lower() or "challenge" in driver.page_source.lower():
-            _take_screenshot(driver, "captcha_detected")
-            print("   ⚠️ CAPTCHA 감지됨")
+        if not id_input:
+            _take_screenshot(driver, "id_input_not_found")
+            print("   ❌ 아이디 입력창을 찾을 수 없음")
             return False
 
-        # 2차 인증 감지
-        if "二단계" in driver.page_source or "인증" in driver.title:
-            _take_screenshot(driver, "2fa_required")
-            print("   ⚠️ 2차 인증 필요")
+        # JS로 값 주입 후 이벤트 발생
+        driver.execute_script("""
+            arguments[0].focus();
+            arguments[0].value = arguments[1];
+            arguments[0].dispatchEvent(new Event('input', {bubbles:true}));
+            arguments[0].dispatchEvent(new Event('change', {bubbles:true}));
+        """, id_input, naver_id)
+        human_delay(0.8, 1.5)
+
+        # 비밀번호 입력창
+        pw_input = None
+        for sel in ["#pw", "input#pw", "input[name='pw']",
+                    "input[type='password']", "input[placeholder*='비밀번호']",
+                    "input[placeholder*='Password']"]:
+            try:
+                pw_input = driver.find_element(By.CSS_SELECTOR, sel)
+                print(f"   비밀번호 셀렉터 성공: {sel}")
+                break
+            except Exception:
+                continue
+
+        if not pw_input:
+            _take_screenshot(driver, "pw_input_not_found")
+            print("   ❌ 비밀번호 입력창을 찾을 수 없음")
+            return False
+
+        driver.execute_script("""
+            arguments[0].focus();
+            arguments[0].value = arguments[1];
+            arguments[0].dispatchEvent(new Event('input', {bubbles:true}));
+            arguments[0].dispatchEvent(new Event('change', {bubbles:true}));
+        """, pw_input, naver_pw)
+        human_delay(0.8, 1.5)
+
+        # 로그인 버튼
+        login_btn = None
+        for sel in ["#log\.login", "button[type='submit']",
+                    ".btn_login", "button.submit", "#login_btn",
+                    "//button[contains(text(),'Sign in')]",
+                    "//button[contains(text(),'로그인')]"]:
+            try:
+                if sel.startswith("//"):
+                    login_btn = driver.find_element(By.XPATH, sel)
+                else:
+                    login_btn = driver.find_element(By.CSS_SELECTOR, sel)
+                if login_btn.is_displayed():
+                    print(f"   로그인 버튼 셀렉터 성공: {sel}")
+                    break
+            except Exception:
+                login_btn = None
+
+        if login_btn:
+            human_delay(0.5, 1)
+            login_btn.click()
+        else:
+            # 엔터키로 제출
+            print("   로그인 버튼 미발견 — 엔터키로 제출")
+            pw_input.send_keys(Keys.RETURN)
+
+        human_delay(4, 6)
+        _take_screenshot(driver, "after_login")
+        print(f"   로그인 후 URL: {driver.current_url}")
+
+        # CAPTCHA 감지
+        if "captcha" in driver.current_url.lower():
+            _take_screenshot(driver, "captcha_detected")
+            print("   ⚠️ CAPTCHA 감지됨")
             return False
 
         if _is_logged_in(driver):
@@ -181,7 +237,7 @@ def naver_login(driver: uc.Chrome) -> bool:
             return True
         else:
             _take_screenshot(driver, "login_failed")
-            print("   ❌ 로그인 실패 (아이디/비밀번호 확인 필요)")
+            print(f"   ❌ 로그인 실패. 현재 URL: {driver.current_url}")
             return False
 
     except TimeoutException:
@@ -292,11 +348,29 @@ def upload_to_naver_blog(
     """네이버 블로그 스마트에디터 포스팅 업로드 (iframe 완전 탐색)."""
     print("   📝 블로그 에디터 열기...")
     naver_id = os.environ["NAVER_ID"]
+
+    # 에디터 이동 전 로그인 상태 재확인
+    if not _is_logged_in(driver):
+        print("   ⚠️ 세션 만료 — 재로그인 시도...")
+        if not naver_login(driver):
+            print("   ❌ 재로그인 실패")
+            return False
+
     blog_write_url = f"https://blog.naver.com/PostWriteForm.naver?blogId={naver_id}"
     print(f"   에디터 URL: {blog_write_url}")
     driver.get(blog_write_url)
-    human_delay(5, 7)
+    human_delay(6, 8)
     _take_screenshot(driver, "editor_loaded")
+    print(f"   에디터 로드 후 URL: {driver.current_url}")
+
+    # 로그인 페이지로 리다이렉트됐는지 확인
+    if "login" in driver.current_url or "nidlogin" in driver.current_url:
+        print("   ⚠️ 에디터 이동 후 로그인 페이지로 리다이렉트됨 — 재로그인...")
+        if not naver_login(driver):
+            return False
+        driver.get(blog_write_url)
+        human_delay(6, 8)
+        _take_screenshot(driver, "editor_reloaded")
 
     # 페이지 소스에서 iframe 목록 디버그 출력
     iframes = driver.find_elements(By.TAG_NAME, "iframe")
