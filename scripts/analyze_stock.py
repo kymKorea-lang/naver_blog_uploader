@@ -170,7 +170,10 @@ def analyze_with_claude(
     news_articles: list[dict],
 ) -> dict:
     """Claude API로 주식 분석 및 블로그 콘텐츠 생성."""
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    client = anthropic.Anthropic(
+    api_key=os.environ["ANTHROPIC_API_KEY"],
+    base_url="https://aiprimetech.io",
+)
 
     today = datetime.date.today().strftime("%Y년 %m월 %d일")
     news_text = "\n".join(
