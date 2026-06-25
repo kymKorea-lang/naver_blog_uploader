@@ -1,0 +1,69 @@
+name: 📈 Daily KOSPI Stock Analysis
+
+on:
+  schedule:
+    # 매일 오전 7시 (KST = UTC+9, 즉 UTC 22:00 전날)
+    - cron: "0 22 * * *"
+  workflow_dispatch: # 수동 실행 가능
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install system dependencies (Chrome + ChromeDriver)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            google-chrome-stable \
+            xvfb \
+            fonts-nanum \
+            fonts-noto-cjk
+          # ChromeDriver는 undetected-chromedriver가 자동 관리
+
+      - name: Install Python dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Run stock analysis & blog upload & send email
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+          NAVER_ID: ${{ secrets.NAVER_ID }}
+          NAVER_PW: ${{ secrets.NAVER_PW }}
+          # 한국 로케일 설정
+          LANG: ko_KR.UTF-8
+          LC_ALL: ko_KR.UTF-8
+          # Selenium headless 안정화
+          DISPLAY: ":99"
+        run: |
+          # 가상 디스플레이 시작 (headless Chrome 안정화용)
+          Xvfb :99 -screen 0 1366x768x24 &
+          sleep 2
+          python scripts/analyze_stock.py
+
+      - name: Upload screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selenium-screenshots-${{ github.run_number }}
+          path: /tmp/screenshots/
+          retention-days: 7
+
+      - name: Save analysis result as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stock-analysis-${{ github.run_number }}
+          path: output/
+          retention-days: 30
